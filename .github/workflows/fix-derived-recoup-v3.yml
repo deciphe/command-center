@@ -1,0 +1,52 @@
+name: Fix Derived Recoup V3
+on:
+  push:
+    paths:
+      - '.github/workflows/fix-derived-recoup-v3.yml'
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply rewrite and repair generated CSV join
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, textwrap
+          y = Path('.github/workflows/fix-derived-recoup.yml').read_text()
+          m = re.search(r"python3 - <<'PY'\n(.*?)\n          PY", y, re.S)
+          assert m
+          code = textwrap.dedent(m.group(1))
+          exec(compile(code, '<recoup-patch>', 'exec'))
+          p = Path('index.html')
+          s = p.read_text()
+          s = s.replace("].join('\n');download", "].join(String.fromCharCode(10));download")
+          p.write_text(s)
+          PY
+      - name: Validate exact final output
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          s=Path('index.html').read_text()
+          for dead in ['Quick · 25%','Half · 50%','Full DD · 100%','hedgeTarget','hedgePct','customMode']:
+              assert dead not in s, dead
+          assert 'requiredGross' in s and 'fullExposure' in s
+          assert round(591*2/.90,2)==1313.33
+          m=re.search(r'<script>(.*)</script>',s,re.S); assert m
+          Path('/tmp/script.js').write_text(m.group(1))
+          PY
+          node --check /tmp/script.js
+      - name: Commit final validated calculator
+        shell: bash
+        run: |
+          rm .github/workflows/fix-derived-recoup.yml .github/workflows/fix-derived-recoup-v2.yml .github/workflows/fix-derived-recoup-v3.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html .github/workflows/fix-derived-recoup.yml .github/workflows/fix-derived-recoup-v2.yml .github/workflows/fix-derived-recoup-v3.yml
+          git commit -m "Derive funded recoup target from acquisition and split"
+          git push
